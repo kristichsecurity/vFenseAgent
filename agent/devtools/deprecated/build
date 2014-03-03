@@ -1,0 +1,158 @@
+#!/usr/bin/python
+
+import os
+import sys
+import shutil
+import subprocess
+
+dirs = ['../bin', '../daemon', '../plugins',
+         '../src', '../deps']
+files = ['../agent.py', '../watcher_mac.py', '../agent.config']
+install_script = 'install'
+
+platforms = ['mac', 'deb', 'rpm']
+
+# deb hebang should point to system python until compiled python is added.
+plat_shebang = {'mac' : '#!agent/deps/mac/Python-2.7.5/bin/python',
+                #'deb' : '#!agent/deps/deb/Python-2.7.5/bin/python',
+                'deb' : '#!/usr/bin/python',
+                'rpm' : '#!agent/deps/rpm/Python-2.7.5/bin/python'}
+
+cmp_py_paths = {'mac' : '{0}/agent/deps/mac/Python-2.7.5/',
+                'deb' : '{0}/agent/deps/deb/Python-2.7.5/',
+                'rpm' : '{0}/agent/deps/rpm/Python-2.7.5/'}
+
+def run_command(cmd):
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+
+    result, err = proc.communicate()
+
+    return result, err
+
+def modify_shebang(agent_dir_name, platform):
+    file_content = []
+
+    with open(os.path.join(agent_dir_name, 'install'), 'r') as _install_script:
+        file_content = _install_script.readlines()
+
+    file_content[0] = plat_shebang[platform] + '\n'
+
+    with open(os.path.join(agent_dir_name, 'install'), 'w') as _install_script:
+        _install_script.writelines(file_content)
+
+def remove_compiled_pythons(agent_dir_name, platform):
+    """
+    Removes compiled pythons which do not correspond to the platform 
+    in argument.
+    """
+    for plat in cmp_py_paths:
+        if plat != platform:
+            # Ignoring errors to avoid errors when Python-2.7.5 doesn't exist
+            shutil.rmtree(
+                cmp_py_paths[plat].format(agent_dir_name), ignore_errors = True
+            )
+
+def copy_dirs(dirs, destination):
+    for d in dirs:
+        dirname = d.split('/')[-1]
+        shutil.copytree(d, os.path.join(destination, dirname))
+
+def copy_files(files, destination):
+    for f in files:
+        filename = f.split('/')[-1]
+        shutil.copy(f, os.path.join(destination, filename))
+
+def copy_install_script(agent_dir_name):
+    shutil.copy(install_script, os.path.join(agent_dir_name, install_script))
+
+def remove_unwanted_files(agent_dir_name):
+    unwated_files = ['.DS_Store']
+
+    for file_name in unwated_files:
+        find_file = '*{0}*'.format(file_name)
+        cmd = ['find', agent_dir_name, '-iname', find_file, '-delete']
+
+        result, err = run_command(cmd)
+
+        if err:
+            raise Exception(err)
+
+    print 'Done deleting unwanted files.'
+
+def create_zip(agent_dir_name):
+    zip_name = agent_dir_name + '.zip'
+
+    if os.path.exists(zip_name):
+        os.remove(zip_name)
+
+    cmd = ['zip', '-r', zip_name, agent_dir_name]
+    result, err = run_command(cmd)
+
+    if err:
+        raise Exception(err)
+
+    print 'Done creating zip.'
+
+def build(agent_dir_name, platform):
+    if platform not in platforms:
+        sys.exit('Platform must one of the following: mac, deb, rpm.')
+
+    if os.path.exists(agent_dir_name):
+        shutil.rmtree(agent_dir_name)
+
+    os.makedirs(agent_dir_name)
+
+    print 'Created directory {0}'.format(agent_dir_name)
+
+    agent_path = os.path.join(agent_dir_name, 'agent')
+
+    copy_dirs(dirs, agent_path)
+    print 'Copied all directories to {0}'.format(agent_dir_name)
+
+    copy_files(files, agent_path)
+    print 'Copied all singular files to {0}'.format(agent_dir_name)
+
+    copy_install_script(agent_dir_name)
+    print 'Copied install script to {0}'.format(agent_dir_name)
+
+    modify_shebang(agent_dir_name, platform)
+    print 'Modified install script shebang.'
+    remove_compiled_pythons(agent_dir_name, platform)
+    print 'Removed compiled pythons that do not correspond.'
+
+    if platform == 'mac':
+        mac_build(agent_dir_name)
+    elif platform == 'deb':
+        deb_build(agent_dir_name)
+    elif platform == 'rpm':
+        rpm_build(agent_dir_name)
+
+    shutil.rmtree(agent_dir_name)
+    print 'Removed temporary agent folder.'
+
+def mac_build(agent_dir_name):
+    """ Do mac specific build stuff in here."""
+    dmg_name = agent_dir_name + '.dmg'
+    cmd = ['hdiutil', 'create', dmg_name, '-srcfolder', agent_dir_name, '-ov']
+
+    print 'running: {0} to create dmg'.format(cmd)
+
+    result, err = run_command(cmd)
+
+    if err:
+        raise Exception(err)
+
+    print 'Done attempting to create dmg.'
+
+def deb_build(agent_dir_name):
+    """ Remove unwanted hidden files, and create a zip file. """
+    remove_unwanted_files(agent_dir_name)
+    create_zip(agent_dir_name)
+
+def rpm_build(agent_dir_name):
+    remove_unwanted_files(agent_dir_name)
+    create_zip(agent_dir_name)
+
+if __name__ == '__main__':
+    build(sys.argv[1], sys.argv[2])

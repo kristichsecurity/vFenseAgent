@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC -//Apple Computer//DTD PLIST 1.0//EN http://www.apple.com/DTDs/PropertyList-1.0.dtd >
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.toppatch.watcher</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/TopPatch/agent/bin/python</string>
+        <string>/opt/TopPatch/agent/watcher_mac.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/opt/TopPatch/agent</string>
+    <key>KeepAlive</key>
+    <true/>
+  </dict>
+</plist>

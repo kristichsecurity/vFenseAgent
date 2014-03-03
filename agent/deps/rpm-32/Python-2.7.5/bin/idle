@@ -1,0 +1,5 @@
+#!/home/toppatch/Desktop/Python-2.7.5-32/bin/python2.7
+
+from idlelib.PyShell import main
+if __name__ == '__main__':
+    main()

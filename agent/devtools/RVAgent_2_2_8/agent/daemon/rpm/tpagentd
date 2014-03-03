@@ -1,0 +1,38 @@
+#! /bin/sh
+
+### BEGIN INIT INFO
+# Provides: tpagentd
+# Default-Start: 2 3 4 5
+# Default-Stop: 0 1 6
+# Short-Description: The TopPatch Agent
+# Description: Provides communication between this agent and the TopPatch Server.
+### END INIT INFO
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+NAME=tpagentd
+DESC="TopPatch Agent"
+DAEMON=/opt/TopPatch/agent/daemon/rpm/tpagentd.py
+
+set -e
+
+case "$1" in
+  start)
+	/opt/TopPatch/agent/bin/python $DAEMON start
+        ;;
+  stop)
+	/opt/TopPatch/agent/bin/python $DAEMON stop
+	;;
+  restart)
+	/opt/TopPatch/agent/bin/python $DAEMON restart
+	;;
+  status)
+	/opt/TopPatch/agent/bin/python $DAEMON status
+	;;
+  *)
+    N=/etc/init.d/$NAME
+    echo "Usage: $N {start|stop|restart|status}" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

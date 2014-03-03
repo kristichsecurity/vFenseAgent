@@ -1,0 +1,27 @@
+#!/usr/bin/python
+
+import os
+import stat
+import shutil
+import subprocess
+
+def _make_exec(path):
+    curr_permissions = os.stat(ptyexec_path)
+    os.chmod(ptyexec_path, curr_permissions.st_mode | stat.S_IEXEC)
+    print "****** Made executable: " + path + " ******"
+
+if __name__ == '__main__':
+    if os.path.exists('build'):
+        shutil.rmtree('build')
+        print "Deleted build directory."
+
+    if os.path.exists('dist'):
+        shutil.rmtree('dist')
+        print "Deleted dist directory."
+
+    cmd = ['python', 'setup.py', 'py2app']
+    proc = subprocess.Popen(cmd)
+    proc.wait()
+
+    ptyexec_path = 'dist/TopPatch Agent.app/Contents/Resources/bin/ptyexec'
+    _make_exec(ptyexec_path)

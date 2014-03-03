@@ -1,0 +1,38 @@
+#! /bin/sh
+
+### BEGIN INIT INFO
+# Provides: tpawatcher
+# Default-Start: 2 3 4 5
+# Default-Stop: 0 1 6
+# Short-Description: The TopPatch Watcher daemon.
+# Description: Monitors the TopPatch Agent to make sure its always running. Restarts if necessary.
+### END INIT INFO
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+NAME=tpawatcher
+DESC="TopPatch Starter"
+DAEMON=/opt/TopPatch/agent/daemon/watcherd.py
+
+set -e
+
+case "$1" in
+  start)
+	python $DAEMON start
+        ;;
+  stop)
+	python $DAEMON stop
+	;;
+  restart)
+	python $DAEMON restart
+	;;
+  status)
+	python $DAEMON status
+	;;
+  *)
+    N=/etc/init.d/$NAME
+    echo "Usage: $N {start|stop|restart|status}" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

@@ -1,0 +1,892 @@
+#!/Volumes/RVAgent_02_01_03/agent/deps/mac/Python-2.7.5/bin/python
+
+import os
+import sys
+import time
+import json
+import shutil
+import argparse
+import datetime
+import platform
+import traceback
+import subprocess
+import ConfigParser
+
+
+class Install:
+    def __init__(self):
+        self.current_dir = self._get_current_dir()
+        self.system_daemon_path = '/Library/LaunchDaemons'
+        self.tmp_location = '/opt/TopPatch/tmp'
+
+        self.daemon_plist_name = 'com.toppatch.agent.plist'
+        self.system_plist = os.path.join(
+            self.system_daemon_path, self.daemon_plist_name
+        )
+
+        self.update_log = '/opt/TopPatch/tmp/TopPatchAgentUpdate.log'
+
+        self.app_settings = 'appSettings'
+        self.agent_info = 'agentInfo'
+
+        self.default_options = {'agentid': '',
+                                'nu': '',
+                                'wp': '',
+                                'serverhostname': '',
+                                'serveripaddress': '',
+                                'serverport': '443',
+                                'agentport': '9003',
+                                'starterport': '9005',
+                                'tunnelport': '22',
+                                'loglevel': 'debug',
+                                'customer': 'default'}
+
+        self.redhat_distros = [
+            'fedora', 'centos', 'centos linux', 'red hat enterprise linux server'
+        ]
+
+        self.debian_distros = ['debian', 'ubuntu', 'linuxmint']
+
+    def _get_date(self):
+        return time.strftime('%m/%d/%Y')
+
+    def _get_platform(self):
+        return platform.system().lower()
+
+    def _get_distro(self):
+        plat = self._get_platform()
+
+        if plat == 'darwin':
+            return 'darwin'
+
+        elif plat == 'linux':
+            return platform.linux_distribution()[0].lower()
+
+        return ''
+
+    def _get_installer(self):
+        distro = self._get_distro()
+
+        if distro == 'darwin':
+            return self.mac_installer
+
+        elif distro in self.redhat_distros:
+            return self.rpm_installer
+
+        elif distro in self.debian_distros:
+            return self.deb_installer
+
+    def _get_updater(self):
+        distro = self._get_distro()
+
+        if distro == 'darwin':
+            return self.mac_updater
+
+        elif distro in self.redhat_distros:
+            return self.rpm_updater
+
+        elif distro in self.debian_distros:
+            return self.deb_updater
+
+    def _get_default_values(self, args):
+        """ 
+        Sets default values to the arguments passed in to install script. 
+
+        Use: For install methods only, not in update!
+
+        Reason: Reason for doing it here instead of in argparse's default
+                parameter is so that in the update method I can check if any
+                arguments have been given new values (not empty argument).
+                If so, update the config file with new arguments.
+        """
+
+        # TODO: find a better way of setting defaults
+
+        if not args.serverport:
+            args.serverport = self.default_options['serverport']
+
+        if not args.agentport:
+            args.agentport = self.default_options['agentport']
+
+        if not args.starterport:
+            args.starterport = self.default_options['starterport']
+
+        if not args.tunnelport:
+            args.tunnelport = self.default_options['tunnelport']
+
+        if not args.loglevel:
+            args.loglevel = self.default_options['loglevel']
+
+        if not args.customer:
+            args.customer = self.default_options['customer']
+
+        return args
+
+    def _create_necessary_dirs(self):
+        try:
+            if not os.path.exists('/opt'):
+                os.makedirs('/opt')
+
+            if not os.path.exists('/opt/TopPatch'):
+                os.makedirs('/opt/TopPatch')
+
+        except Exception as e:
+            raise Exception(e)
+
+    def _run_command(self, cmd):
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE)
+
+        result, err = proc.communicate()
+
+        return result, err
+
+    def _write_log(self, file_path, error):
+        with open(file_path, 'a') as _file:
+            _file.write("%s : %s" % (str(datetime.datetime.now()), str(error)))
+            _file.write(os.linesep)
+
+    def _write_update_log(self, message):
+        self._write_log(self.update_log, message)
+
+    def _delete_update_log(self):
+        try:
+            os.remove(self.update_log)
+        except Exception as e:
+            self._write_update_log('Failed to remove update log.')
+
+    def _write_install_log(self, message):
+        if not os.path.exists('/opt'):
+            os.makedirs('/opt')
+
+        if not os.path.exists('/opt/TopPatch'):
+            os.makedirs('/opt/TopPatch')
+
+        self._write_log('/opt/TopPatch/agent_install_failure.log', message)
+
+    def _unload_plist(self, path):
+        cmd = ['launchctl', 'unload', path]
+        result, err = self._run_command(cmd)
+
+        return True
+
+    def _load_plist(self, path):
+        cmd = ['launchctl', 'load', '-w', path]
+        result, err = self._run_command(cmd)
+
+        if err:
+            raise Exception(err)
+
+    def _get_current_dir(self):
+        return os.path.dirname(os.path.abspath(__file__))
+
+    def _get_config_option(self, config_reader, section, option):
+        default = self.default_options[option]
+
+        try:
+            config_option = config_reader.get(section, option)
+            return config_option
+        except Exception:
+            return default
+
+    def _update_config(self, args, new_agent_path):
+
+        if '.app' in args.old_agent_path:
+            old_config = os.path.join(
+                args.old_agent_path, 'Contents', 'Resources', 'agent.config'
+            )
+        else:
+            old_config = os.path.join(args.old_agent_path, 'agent.config')
+
+
+        read_old_config = ConfigParser.SafeConfigParser()
+        read_old_config.read(old_config)
+
+        agentid = self._get_config_option(
+            read_old_config, self.app_settings, 'agentid'
+        )
+
+        username = self._get_config_option(
+            read_old_config, self.app_settings, 'nu'
+        )
+
+        password = self._get_config_option(
+            read_old_config, self.app_settings, 'wp'
+        )
+
+        serverhostname = self._get_config_option(
+            read_old_config, self.app_settings, 'serverhostname'
+        )
+
+        serveripaddress = self._get_config_option(
+            read_old_config, self.app_settings, 'serveripaddress'
+        )
+
+        serverport = self._get_config_option(
+            read_old_config, self.app_settings, 'serverport'
+        )
+
+        starterport = self._get_config_option(
+            read_old_config, self.app_settings, 'starterport'
+        )
+
+        tunnelport = self._get_config_option(
+            read_old_config, self.app_settings, 'tunnelport'
+        )
+
+        agentport = self._get_config_option(
+            read_old_config, self.app_settings, 'agentport'
+        )
+
+        loglevel = self._get_config_option(
+            read_old_config, self.app_settings, 'loglevel'
+        )
+
+        customer = self._get_config_option(
+            read_old_config, self.app_settings, 'customer'
+        )
+
+        if args.agentid:
+            agentid = args.agentid
+
+        if args.username:
+            username = args.username
+
+        if args.password:
+            password = args.password
+
+        if args.serverhostname:
+            serverhostname = args.serverhostname
+
+        if args.serveripaddress:
+            serveripaddress = args.serveripaddress
+
+        if args.serverport:
+            serverport = args.serverport
+
+        if args.starterport:
+            starterport = args.starterport
+
+        if args.tunnelport:
+            tunnelport = args.tunnelport
+
+        if args.agentport:
+            agentport = args.agentport
+
+        if args.loglevel:
+            loglevel = args.loglevel
+
+        if args.customer:
+            customer = args.customer
+
+        # Grab the agentInfo of the new config
+        new_config = os.path.join(new_agent_path, 'agent.config')
+        read_new_config = ConfigParser.SafeConfigParser()
+        read_new_config.read(new_config)
+
+        name = read_new_config.get(self.agent_info, 'name')
+        version = read_new_config.get(self.agent_info, 'version')
+        description = read_new_config.get(self.agent_info, 'description')
+
+        write_config = ConfigParser.SafeConfigParser()
+        write_config.add_section(self.app_settings)
+        write_config.set(self.app_settings, 'agentid', agentid)
+        write_config.set(self.app_settings, 'nu', username)
+        write_config.set(self.app_settings, 'wp', password)
+        write_config.set(self.app_settings, 'serverhostname', serverhostname)
+        write_config.set(self.app_settings, 'serveripaddress', serveripaddress)
+        write_config.set(self.app_settings, 'serverport', serverport)
+        write_config.set(self.app_settings, 'starterport', starterport)
+        write_config.set(self.app_settings, 'tunnelport', tunnelport)
+        write_config.set(self.app_settings, 'agentport', agentport)
+        write_config.set(self.app_settings, 'loglevel', loglevel)
+        write_config.set(self.app_settings, 'customer', customer)
+
+        write_config.add_section(self.agent_info)
+        write_config.set(self.agent_info, 'name', name)
+        write_config.set(self.agent_info, 'version', version)
+        write_config.set(self.agent_info, 'description', description)
+        write_config.set(self.agent_info, 'installdate', self._get_date())
+
+        with open(new_config, 'w') as _file:
+            write_config.write(_file)
+
+    def _install_config(self, config_path, args):
+        read_config = ConfigParser.SafeConfigParser()
+        write_config = ConfigParser.SafeConfigParser()
+
+        read_config.read(config_path)
+        AgentName = read_config.get(self.agent_info, 'name')
+        AgentVersion = read_config.get(self.agent_info, 'version')
+        AgentDescription = read_config.get(self.agent_info, 'description')
+
+        write_config.add_section(self.app_settings)
+        write_config.set(self.app_settings, 'agentid', args.agentid)
+        write_config.set(self.app_settings, 'nu', args.username)
+        write_config.set(self.app_settings, 'wp', args.password)
+        write_config.set(self.app_settings, 'serverhostname', args.serverhostname)
+        write_config.set(self.app_settings, 'serveripaddress', args.serveripaddress)
+        write_config.set(self.app_settings, 'serverport', args.serverport)
+        write_config.set(self.app_settings, 'agentport', args.agentport)
+        write_config.set(self.app_settings, 'tunnelport', args.tunnelport)
+        write_config.set(self.app_settings, 'loglevel', args.loglevel)
+        write_config.set(self.app_settings, 'customer', args.customer)
+
+        write_config.add_section(self.agent_info)
+        write_config.set(self.agent_info, 'name', AgentName)
+        write_config.set(self.agent_info, 'version', AgentVersion)
+        write_config.set(self.agent_info, 'description', AgentDescription)
+        write_config.set(self.agent_info, 'installdate', self._get_date())
+
+        with open(config_path, 'w') as _file:
+            write_config.write(_file)
+
+    def _remove_running_plist(self):
+        try:
+            if os.path.exists(self.system_plist):
+                self._unload_plist(self.system_plist)
+                # TODO: no need to delete, since the install overwrites?
+        except Exception as e:
+            self._write_install_log('Failed to remove running agent.')
+
+    def eject_dmg(self, mount_point):
+        """Ejects the mount point give.
+
+        Args:
+
+            - mount_point: Mount point to eject. (ie: /Volumes/Image.dmg)
+
+        Returns:
+
+            - True if ejected successfully; False otherwise.
+        """
+
+        hdiutil_cmd = '/usr/bin/hdiutil'
+        cmd = [hdiutil_cmd, 'detach', '-force', mount_point]
+        ejected = False
+
+        try:
+
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE
+            )
+
+            raw_output, _stderr = process.communicate()
+
+            error_message = ''
+
+            for line in raw_output.splitlines():
+
+                if 'ejected' in line:
+
+                    ejected = True
+                    break
+
+                else:
+
+                    error_message += line
+
+        except Exception as e:
+            raise Exception(e)
+
+        return ejected
+
+    def _copy_old_config(self, from_app_path, to_app_path):
+        if '.app' in from_app_path:
+            from_config_path = 'Contents/Resources/agent.config'
+        else:
+            from_config_path = 'agent.config'
+
+        to_config_path = 'agent.config'
+
+        try:
+            shutil.copy(os.path.join(from_app_path, from_config_path),
+                        os.path.join(to_app_path, to_config_path))
+        except Exception as e:
+            raise Exception(e)
+
+        return True
+
+    def _overwrite_system_daemon_plist(self, agent_path):
+        plist_path = os.path.join('daemon', 'mac', self.daemon_plist_name)
+
+        try:
+            shutil.copy(os.path.join(agent_path, plist_path), self.system_plist)
+        except Exception as e:
+            raise Exception(e)
+
+        return True
+
+    def _delete_agent(self, agent_path):
+        if os.path.exists(agent_path):
+            try:
+                shutil.rmtree(agent_path)
+            except Exception as e:
+                raise Exception(e)
+
+    def update(self, args):
+        try:
+            updater = self._get_updater()
+            updater(args)
+
+        except Exception as e:
+            self._write_update_log(e)
+            self._write_update_log(traceback.format_exc())
+
+    def _write_operation_success(self, app_id, operation_id, success, path):
+        root = {}
+        root['app_id'] = app_id
+        root['operation_id'] = operation_id
+        root['success'] = success
+
+        self._write_update_log(json.dumps(root))
+
+        with open(path, 'w') as _file:
+            json.dump(root, _file)
+
+    def mac_updater(self, args):
+        app_dir = 'agent'
+        install_path = os.path.join('/opt', 'TopPatch', app_dir)
+        tmp_agent_path = os.path.join(self.tmp_location, app_dir)
+
+        try:
+            self._create_necessary_dirs()
+
+            if not os.path.exists(self.tmp_location):
+                os.makedirs(self.tmp_location)
+
+            # Unload old agent plist
+            self._unload_plist(self.system_plist)
+            self._write_update_log("Unloaded old daemon process.")
+
+            # Move the applciation from image to temporary folder.
+            # Allows copying over old config without deleting old agent, yet.
+            self._delete_agent(tmp_agent_path) # delete if already exists
+            shutil.copytree(os.path.join(self.current_dir, app_dir), tmp_agent_path)
+            self._write_update_log("Copied the new agent to tmp directory.")
+
+            self._update_config(args, tmp_agent_path)
+            self._write_update_log("Copied/updated old config file.")
+
+            vine_settings = os.path.join(
+                args.old_agent_path, 'etc', '.vinesettings'
+            )
+            if os.path.exists(vine_settings):
+                tmp_etc = os.path.join(tmp_agent_path, 'etc')
+
+                if not os.path.exists(tmp_etc):
+                    os.makedirs(tmp_etc)
+
+                tmp_vnc_path = os.path.join(tmp_etc, '.vinesettings')
+
+                # If it exists, copy it over to the new agent.
+                shutil.copy(vine_settings, tmp_vnc_path)
+
+            self._overwrite_system_daemon_plist(tmp_agent_path)
+            self._write_update_log("Agent plist has been overwritten.")
+
+            self._delete_agent(args.old_agent_path)
+            self._write_update_log("Deleted old agent.")
+
+            shutil.move(tmp_agent_path, install_path)
+            self._write_update_log("Moved new agent to /opt directory.")
+
+            self._create_symlink(
+                    '/opt/TopPatch/agent/deps/mac/Python-2.7.5/bin/python',
+                    '/opt/TopPatch/agent/bin/python'
+            )
+            self._write_update_log("Created symlink.")
+
+            self._load_plist(self.system_plist)
+            self._write_update_log("Loaded plist.")
+
+            # TODO: undo hack
+            self._write_update_log("{0} , {1}".format(args.appid, args.operationid))
+            if args.appid and args.operationid:
+                etc_path = os.path.join(install_path, 'etc')
+                success = 'true'
+
+                self._write_update_log("etc_path: {0}".format(etc_path))
+
+                if not os.path.exists(etc_path):
+                    os.makedirs(etc_path)
+
+                update_file = os.path.join(etc_path, '.agent_update')
+
+                self._write_update_log("update_file: {0}".format(update_file))
+
+                self._write_operation_success(
+                    args.appid, args.operationid, success, update_file
+                )
+
+            # Clean up
+            #shutil.rmtree(self.tmp_location)
+            self._write_update_log("current_dir: {0}".format(self.current_dir))
+
+            # Change directory so that this can be unmounted.
+            os.chdir('/opt')
+            self.eject_dmg(self.current_dir)
+
+        except Exception as e:
+            self._write_update_log(e)
+            self._write_update_log(traceback.format_exc())
+
+            try:
+                self._delete_agent(tmp_agent_path)
+            except Exception as e2:
+                self._write_update_log("Failed to remove tmp agent.")
+                self._write_update_log(e2)
+                self._write_update_log(traceback.format_exc())
+
+            self.eject_dmg(self.current_dir)
+
+    def deb_updater(self):
+        pass
+
+    def rpm_updater(self):
+        pass
+
+    def _check_user_input(self, args):
+        if not args.username or not args.password:
+            sys.exit(
+                ("Please provide both username and password to -u and -pw "
+                 "respectively.")
+            )
+
+        if not args.serverhostname and not args.serveripaddress:
+            sys.exit(
+                'Please provide server hostname to -s or serveripaddress to -i.'
+            )
+
+    def _create_symlink(self, symlink_target, symlink_path):
+        cmd = ['/bin/ln', '-s', symlink_target, symlink_path]
+        result, err = self._run_command(cmd)
+
+        if err:
+            raise Exception(err)
+
+    def _rpm_remove_service(self):
+        cmd = ['/sbin/service', 'tpagentd', 'stop']
+        output, err = self._run_command(cmd)
+
+        # Does not seem to spit out anything as output.
+        cmd = ['/sbin/chkconfig', '--del', 'tpagentd']
+        output, err = self._run_command(cmd)
+        if err:
+            raise Exception(err)
+
+    def _rpm_clean_after_failure(self):
+        self._rpm_remove_service()
+
+        if os.path.exists('/etc/init.d/tpagentd'):
+            os.remove('/etc/init.d/tpagentd')
+
+        if os.path.exists('/opt/TopPatch/agent'):
+            shutil.rmtree('/opt/TopPatch/agent')
+
+    def _rpm_check_run_levels(self):
+        cmd = ['/sbin/chkconfig', '--list']
+        output, err = self._run_command(cmd)
+        if err:
+            raise Exception("Could not check agent run levels.")
+
+        correct_levels = \
+            ['0:off', '1:off', '2:on', '3:on', '4:on', '5:on', '6:off']
+
+        output = output.splitlines()
+        for line in output:
+            if line.startswith('tpagentd'):
+                run_levels = line.split()[1:]
+
+                for level in run_levels:
+                    if level not in correct_levels:
+                        raise Exception(
+                            "{0} is not a correct run level.".format(level)
+                        )
+
+                    print "{0} is correct.".format(level)
+
+                return  # CORRECT!
+
+        raise Exception("Agent was not found in chkconfig listing.")
+
+    def rpm_installer(self, args):
+        args = self._get_default_values(args)
+
+        try:
+            agent_dirname = 'agent'
+            agent_opt_path = os.path.join('/opt/TopPatch/', agent_dirname)
+
+            if os.path.exists(agent_opt_path):
+                shutil.rmtree(agent_opt_path)
+
+            shutil.copytree(agent_dirname, agent_opt_path)
+            print "Done copying TopPatch agent to /opt/TopPatch/agent."
+
+            rpm6 = '/opt/TopPatch/agent/deps/rpm6/Python-2.7.5/bin/python'
+            rpm6_32 = '/opt/TopPatch/agent/deps/rpm6-32/Python-2.7.5/bin/python'
+
+            rpm = '/opt/TopPatch/agent/deps/rpm/Python-2.7.5/bin/python'
+            rpm_32 = '/opt/TopPatch/agent/deps/rpm-32/Python-2.7.5/bin/python'
+
+            if os.path.exists(rpm6):
+                compiled_python = rpm6
+            elif os.path.exists(rpm6_32):
+                compiled_python = rpm6_32
+            elif os.path.exists(rpm_32):
+                compiled_python = rpm_32
+            else:
+                compiled_python = rpm
+
+            # Create symlink to corresponding compiled python
+            self._create_symlink(
+                compiled_python, '/opt/TopPatch/agent/bin/python'
+            )
+
+            self._install_config(
+                os.path.join(agent_opt_path, 'agent.config'), args
+            )
+            print "Done creating agent's config."
+
+            shutil.copy(
+                os.path.join(agent_opt_path, 'daemon', 'rpm', 'tpagentd'),
+                '/etc/init.d/'
+            )
+            print "Done copying tpagentd init script to /etc/init.d"
+
+            cmd = ['/sbin/chkconfig', '--add', 'tpagentd']
+            output, err = self._run_command(cmd)
+            if err:
+                raise Exception(err)
+
+            print "Checking run levels."
+            self._rpm_check_run_levels()
+            print "Done checking run levels."
+
+            print "Attempting to start agent."
+            cmd = ['/sbin/service', 'tpagentd', 'start']
+            with open(os.devnull, 'w') as dev_null:
+                subprocess.call(cmd, stdout=dev_null, stderr=dev_null)
+
+            cmd = ['/sbin/service', 'tpagentd', 'status']
+            output, err = self._run_command(cmd)
+
+            if "TopPatch Agent is running." not in err:
+                raise Exception("TopPatch Agent is not running.")
+
+            print "TopPatch Agent is running."
+
+        except Exception as e:
+            print "*** Failed to install ***"
+            print str(e)
+            self._write_install_log(e)
+            self._write_install_log(traceback.format_exc())
+
+            try:
+
+                self._rpm_clean_after_failure()
+
+            except Exception as e2:
+                print " *** Failed to remove all TopPatch Agent files *** "
+                print str(e2)
+                self._write_install_log(e2)
+                self._write_install_log(traceback.format_exc())
+
+
+    def _deb_check_run_levels(self):
+        in_correct_levels = True
+
+        for level in range(2, 6):
+            rc_dir = '/etc/rc{0}.d/'.format(level)
+            if 'S20tpagentd' in os.listdir(rc_dir):
+                pass
+            else:
+                self._write_install_log("S20tpagentd not in /etc/rc{0}.d/"
+                                        .format(level))
+                in_correct_levels = False
+
+        return in_correct_levels
+
+    def deb_installer(self, args):
+        args = self._get_default_values(args)
+
+        try:
+            agent_dirname = 'agent'
+            agent_opt_path = os.path.join('/opt', 'TopPatch', agent_dirname)
+
+            if os.path.exists(agent_opt_path):
+                shutil.rmtree(agent_opt_path)
+
+            shutil.copytree(agent_dirname, agent_opt_path)
+            print "Done copying TopPatch over to /opt"
+
+            self._create_symlink(
+                '/usr/bin/python',
+                '/opt/TopPatch/agent/bin/python'
+            )
+            print "Done creating symlink."
+
+            self._install_config(
+                os.path.join(agent_opt_path, 'agent.config'), args
+            )
+            print "Done creating agent config."
+
+            shutil.copy(
+                os.path.join(agent_opt_path, 'daemon', 'deb', 'tpagentd'),
+                '/etc/init.d/'
+            )
+            print "Done copying tpagentd to init.d"
+
+            cmd = ['/usr/sbin/update-rc.d', 'tpagentd', 'defaults']
+            results, err = self._run_command(cmd)
+            print "Done calling update-rc.d"
+
+            if not self._deb_check_run_levels():
+                raise Exception("tpagentd not added to correct run levels.")
+
+            cmd = ['/usr/sbin/service', 'tpagentd', 'start']
+            with open(os.devnull, 'w') as dev_null:
+                subprocess.call(cmd, stdout=dev_null, stderr=dev_null)
+
+            cmd = ['/usr/sbin/service', 'tpagentd', 'status']
+            result, err = self._run_command(cmd)
+
+            running_status = 'TopPatch Agent is running.'
+
+            if running_status in result or running_status in err:
+                print running_status
+            else:
+                print "Error: TopPatch Agent failed to start."
+                raise Exception(("TopPatch Agent failed to start on call to: "
+                                 "'service tpagentd status'."))
+
+        except Exception as e:
+            self._write_install_log(e)
+            self._write_install_log(traceback.format_exc())
+
+    def mac_installer(self, args):
+        """ The system must be clear of all agent files in order to
+            use this method.
+        """
+        args = self._get_default_values(args)
+
+        try:
+
+            self._remove_running_plist()
+
+            agent_dirname = 'agent'
+            agent_opt_path = os.path.join('/opt', 'TopPatch', agent_dirname)
+
+            if os.path.exists(agent_opt_path):
+                shutil.rmtree(agent_opt_path)
+
+            # Move the agent
+            shutil.copytree(os.path.join(self.current_dir, agent_dirname),
+                            agent_opt_path)
+
+            # write to agent.config
+            agent_config_path = os.path.join(agent_opt_path, 'agent.config')
+            self._install_config(agent_config_path, args)
+
+            # Move agent's plist
+            agent_plist_path = os.path.join(
+                agent_opt_path, 'daemon', 'mac', self.daemon_plist_name
+            )
+            shutil.copy(agent_plist_path, self.system_daemon_path)
+
+            # Create symlink to corresponding compiled python
+            self._create_symlink(
+                '/opt/TopPatch/agent/deps/mac/Python-2.7.5/bin/python',
+                '/opt/TopPatch/agent/bin/python'
+            )
+
+            # Run agent's plist
+            self._load_plist(
+                os.path.join(self.system_daemon_path, self.daemon_plist_name)
+            )
+
+        except Exception as e:
+            self._write_install_log(e)
+            self._write_install_log(traceback.format_exc())
+
+    def install(self, args):
+        try:
+            self._check_user_input(args)
+
+            self._create_necessary_dirs()
+
+            installer = self._get_installer()
+            installer(args)
+
+        except Exception as e:
+            self._write_install_log(e)
+            self._write_install_log(traceback.format_exc())
+
+if __name__ == '__main__':
+
+    if os.geteuid() != 0:
+        sys.exit("install script must be run as root.")
+
+    if sys.maxsize > 2**32:
+        compiled_python = '64bit'
+    else:
+        compiled_python = '32bit'
+
+    sys_arch = platform.architecture()[0]
+
+    if compiled_python != sys_arch:
+        sys.exit(
+            ("This system appears to be {0}, but the agent is {1}."
+             " Please install the {0} agent."
+             .format(sys_arch, compiled_python))
+        )
+
+    parser = argparse.ArgumentParser()
+
+    #########################################################################
+    # Any additional arguments should also be added to _get_default_values! #
+    #########################################################################
+
+    parser.add_argument("-u", "--username", dest="username", default="",
+                        help="This is required.")
+    parser.add_argument("-pw", "--password", dest="password", default="",
+                        help="This is required.")
+    parser.add_argument(
+        "-s", "--serverhostname", default="", dest="serverhostname", nargs="?",
+        help=("Please provide server hostname and/or server ip address."
+              " Only one required.")
+    )
+    parser.add_argument(
+        "-i", "--serveripaddress", default="", dest="serveripaddress", nargs="?",
+        help=("Please provide server ip address and/or server hostname."
+              " Only one required.")
+    )
+    parser.add_argument("-p", "--serverport", default="", dest="serverport",
+                        help="Default: 443.")
+    parser.add_argument("-a", "--agentport", default="", dest="agentport",
+                        help="Default: 9003.")
+    parser.add_argument("-sp", "--starterport", default="", dest="starterport",
+                        help="Default: 9005.")
+    parser.add_argument("-tp", "--tunnelport", default="", dest="tunnelport",
+                        help="Default: 22.")
+    parser.add_argument("-l", "--loglevel", default="", dest="loglevel",
+                        help="Default: debug.")
+    parser.add_argument("-c", "--customer", default="", dest="customer",
+                        help="Default: default.")
+
+    # If called, provide it with the path to the old agent
+    parser.add_argument("--update", default="", dest="old_agent_path",
+                        help=("Should only be used to flag an update. "
+                              "Current agent path must be provided."))
+    parser.add_argument("--agentid", default="", dest="agentid")
+    parser.add_argument("--operationid", default="", dest="operationid")
+    parser.add_argument("--appid", default="", dest="appid")
+
+    args = parser.parse_args()
+
+    install = Install()
+    if args.old_agent_path:
+        install.update(args)
+    else:
+        install.install(args)
+

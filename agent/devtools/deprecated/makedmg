@@ -1,0 +1,38 @@
+#!/usr/bin/python
+
+import os
+import sys
+import shutil
+
+dirs = ['../bin', '../daemon', '../plugins',
+         '../src', '../deps']
+
+files = ['../agent.py', '../watcher_mac.py', '../agent.config']
+
+install_script = 'install'
+
+def copy_dirs(dirs, destination):
+    for d in dirs:
+        dirname = d.split('/')[-1]
+        shutil.copytree(d, os.path.join(destination, dirname))
+
+def copy_files(files, destination):
+    for f in files:
+        filename = f.split('/')[-1]
+        shutil.copy(f, os.path.join(destination, filename))
+
+def main(dmg_name):
+    if os.path.exists(dmg_name):
+        shutil.rmtree(dmg_name)
+
+    os.makedirs(dmg_name)
+
+    agent_path = os.path.join(dmg_name, 'agent')
+
+    copy_dirs(dirs, agent_path)
+    copy_files(files, agent_path)
+
+    shutil.copy(install_script, os.path.join(dmg_name, install_script))
+
+if __name__ == '__main__':
+    main(sys.argv[1])

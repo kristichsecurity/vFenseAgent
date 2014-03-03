@@ -1,0 +1,5 @@
+#!/home/toppatch/Desktop/Python-2.7.5-32/bin/python2.7
+
+import pydoc
+if __name__ == '__main__':
+    pydoc.cli()
