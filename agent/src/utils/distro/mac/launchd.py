@@ -44,13 +44,11 @@ class LaunchdJobException(Exception):
 class Job(object):
     '''launchd job object'''
 
-    def __init__(self, cmd, environment_vars=None, proc_niceness=0):
+    def __init__(self, cmd, environment_vars=None):
         tmpdir = _temp_dir
         LABELPREFIX = 'com.toppatch.agent.'
         # create a unique id for this job
         jobid = str(uuid.uuid1())
-
-        self.proc_niceness = proc_niceness
 
         self.label = LABELPREFIX + jobid
         self.stdout_path = os.path.join(tmpdir, self.label + '.stdout')
@@ -76,11 +74,12 @@ class Job(object):
         os.chmod(self.plist_path, int('644', 8))
         launchctl_cmd = ['/bin/launchctl', 'load', self.plist_path]
         proc = subprocess.Popen(
-            launchctl_cmd, shell=False, bufsize=1,
+            launchctl_cmd,
+            shell=False,
+            bufsize=1,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            preexec_fn=lambda: os.nice(proc_niceness)
+            stderr=subprocess.PIPE
         )
         (unused_out, err) = proc.communicate()
         if proc.returncode:
@@ -110,13 +109,15 @@ class Job(object):
 
     def start(self):
         '''Start the launchd job'''
+
         launchctl_cmd = ['/bin/launchctl', 'start', self.label]
         proc = subprocess.Popen(
-            launchctl_cmd, shell=False, bufsize=-1,
+            launchctl_cmd,
+            shell=False,
+            bufsize=-1,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            preexec_fn=lambda: os.nice(self.proc_niceness)
         )
         (unused_out, err) = proc.communicate()
         if proc.returncode:

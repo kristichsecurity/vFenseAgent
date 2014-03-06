@@ -137,9 +137,9 @@ class RvError(OperationError):
 
 class CpuPriority():
 
-    BelowNormal = 'below_normal'
+    BelowNormal = 'below normal'
     Normal = 'normal'
-    AboveNormal = 'above_normal'
+    AboveNormal = 'above normal'
     Idle = 'idle'
     High = 'high'
 
@@ -154,6 +154,29 @@ class CpuPriority():
         }
 
         return niceness_values.get(throttle_value, 0)
+
+    @staticmethod
+    def acceptable_int_niceness(niceness):
+        if (isinstance(niceness, int) and
+            niceness >= CpuPriority.get_niceness(CpuPriority.High) and
+            niceness <= CpuPriority.get_niceness(CpuPriority.BelowNormal)
+           ):
+            return True
+
+        return False
+
+    @staticmethod
+    def niceness_to_string(niceness):
+        if CpuPriority.acceptable_int_niceness(niceness):
+            return str(niceness)
+
+        try:
+            if CpuPriority.acceptable_int_niceness(int(niceness)):
+                return niceness
+        except Exception:
+            pass
+
+        return '0'
 
 
 class InstallData():

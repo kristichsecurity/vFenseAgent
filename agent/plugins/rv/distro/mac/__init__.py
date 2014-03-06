@@ -86,10 +86,15 @@ class PkgInstaller():
         # that makes softwareupdate think it is connected to a tty-like
         # device so its output is unbuffered so we can get progress info
         # '-v' (verbose) option is available on OSX > 10.5
+
         cmd = [
+            'nice',
+            '-n',
+            CpuPriority.niceness_to_string(proc_niceness),
             self.ptyexec_cmd,
             self.softwareupdate_cmd,
-            '-v', '-i',
+            '-v',
+            '-i',
             update_name
         ]
         logger.debug("Running softwareupdate: " + str(cmd))
@@ -101,7 +106,7 @@ class PkgInstaller():
             raise PtyExecMissingException(settings.BinPath)
 
         try:
-            job = launchd.Job(cmd, proc_niceness=proc_niceness)
+            job = launchd.Job(cmd)
             job.start()
         except launchd.LaunchdJobException as e:
             error_message = 'Error with launchd job (%s): %s' % (cmd, str(e))
