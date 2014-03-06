@@ -8,8 +8,6 @@ from serveroperation.sofoperation import OperationError
 from utils import logger
 from utils import settings
 
-from data.application import InstallData, UninstallData
-
 
 class RvOperationValue():
     # The corresponding SOF equivalent. (Case sensitive)
@@ -143,7 +141,48 @@ class CpuPriority():
     Normal = 'normal'
     AboveNormal = 'above_normal'
     Idle = 'idle'
-    High = 'High'
+    High = 'high'
+
+    @staticmethod
+    def get_niceness(throttle_value):
+        niceness_values = {
+            CpuPriority.BelowNormal: 5,
+            CpuPriority.Normal: 0,
+            CpuPriority.Idle: 0,
+            CpuPriority.AboveNormal: -5,
+            CpuPriority.High: -10
+        }
+
+        return niceness_values.get(throttle_value, 0)
+
+
+class InstallData():
+
+    def __init__(self):
+
+        self.name = ""
+        self.id = ""
+        # TODO: remove uris when file_data is up and ready
+        self.uris = []
+        self.file_data = []
+        self.third_party = False
+        self.cli_options = ""
+        self.downloaded = False
+        self.proc_niceness = 0
+
+    def __repr__(self):
+        return "InstallData(name=%s, id=%s, uris=%s)" % (
+            self.name, self.id, self.uris)
+
+
+class UninstallData():
+
+    def __init__(self):
+
+        self.name = ""
+        self.id = ""
+        self.third_party = False
+        self.cli_options = ""
 
 
 class RvSofOperation(SofOperation):
@@ -155,6 +194,7 @@ class RvSofOperation(SofOperation):
 
         # TODO: Fix hack. Lazy to use rvplugin module because of circular deps.
         self.plugin = 'rv'
+        self.cpu_priority = self._get_cpu_priority()
 
         if self.type in RvOperationValue.InstallOperations:
 
@@ -165,7 +205,6 @@ class RvSofOperation(SofOperation):
             else:
                 self.restart = RvOperationValue.IgnoredRestart
 
-
         elif self.type == RvOperationValue.Uninstall:
 
             self.uninstall_data_list = self._load_uninstall_data()
@@ -175,10 +214,10 @@ class RvSofOperation(SofOperation):
             self.cli_options = self.json_message[RvOperationKey.CliOptions]
             self.package_urn = self.json_message[RvOperationKey.Uris]
 
-        if RvOperationKey.CpuThrottle in self.json_message:
-            self.cpu_priority = self.json_message[RvOperationKey.CpuThrottle]
-        else:
-            self.cpu_priority = CpuPriority.Normal
+    def _get_cpu_priority(self):
+        return self.json_message.get(
+            RvOperationKey.CpuThrottle, CpuPriority.Normal
+        )
 
     def _load_install_data(self):
         """Parses the 'data' key to get the application info for install.
@@ -203,7 +242,10 @@ class RvSofOperation(SofOperation):
 
                 install_data.name = data[RvOperationKey.Name]
                 install_data.id = data[RvOperationKey.AppId]
-                install_data.cli_options = data.get(RvOperationKey.CliOptions, '')
+                install_data.cli_options = \
+                    data.get(RvOperationKey.CliOptions, '')
+                install_data.proc_niceness = \
+                    CpuPriority.get_niceness(self._get_cpu_priority())
 
                 if RvOperationKey.Uris in data:
 

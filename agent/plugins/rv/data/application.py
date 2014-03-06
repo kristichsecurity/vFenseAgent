@@ -2,6 +2,7 @@ import datetime
 
 from utils import settings
 
+
 class Application():
 
     def __init__(self):
@@ -147,7 +148,7 @@ class CreateApplication():
 
                 return int(date.date().strftime(settings.DATE_FORMAT))
 
-            except Exception as e:
+            except Exception:
                 pass
 
             try:
@@ -155,7 +156,7 @@ class CreateApplication():
 
                 return int(date.date().strftime(settings.DATE_FORMAT))
 
-            except Exception as e:
+            except Exception:
                 pass
 
             try:
@@ -164,35 +165,7 @@ class CreateApplication():
 
                 return int(date.date().strftime(settings.DATE_FORMAT))
 
-            except Exception as e:
+            except Exception:
                 pass
 
         return 0.0
-
-
-class InstallData():
-
-    def __init__(self):
-
-        self.name = ""
-        self.id = ""
-        # TODO: remove uris when file_data is up and ready
-        self.uris = []
-        self.file_data = []
-        self.third_party = False
-        self.cli_options = ""
-        self.downloaded = False
-
-    def __repr__(self):
-        return "InstallData(name=%s, id=%s, uris=%s)" % (
-            self.name, self.id, self.uris)
-
-
-class UninstallData():
-
-    def __init__(self):
-
-        self.name = ""
-        self.id = ""
-        self.third_party = False
-        self.cli_options = ""

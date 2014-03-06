@@ -10,6 +10,8 @@ from utils import logger
 from utils.distro.mac import launchd
 from utils.distro.mac.plist import PlistInterface
 
+from rv.rvsofoperation import CpuPriority
+
 
 class PkgInstaller():
     """ A class to install Mac OS X packages using '/usr/sbin/installer'.
@@ -78,7 +80,7 @@ class PkgInstaller():
         return success, error
 
     # Old code on how to use softwareupdate to install updates.
-    def softwareupdate(self, update_name):
+    def softwareupdate(self, update_name, proc_niceness):
 
         #  Need to wrap call to /usr/sbin/softwareupdate with a utility
         # that makes softwareupdate think it is connected to a tty-like
@@ -99,7 +101,7 @@ class PkgInstaller():
             raise PtyExecMissingException(settings.BinPath)
 
         try:
-            job = launchd.Job(cmd)
+            job = launchd.Job(cmd, proc_niceness=proc_niceness)
             job.start()
         except launchd.LaunchdJobException as e:
             error_message = 'Error with launchd job (%s): %s' % (cmd, str(e))
@@ -299,7 +301,9 @@ class PkgInstaller():
             self._move_pkgs(install_data, app_plist_data)
 
             update_name = self._get_softwareupdate_name(app_plist_data)
-            success, error = self.softwareupdate(update_name)
+            success, error = self.softwareupdate(
+                update_name, install_data.proc_niceness
+            )
 
         except Exception as e:
             logger.error("Failed to install pkg: " + install_data.name)
@@ -350,7 +354,9 @@ class PkgInstaller():
                 time.sleep(5 * i)
 
             update_name = self._get_softwareupdate_name(app_plist_data)
-            success, error = self.softwareupdate(update_name)
+            success, error = self.softwareupdate(
+                update_name, install_data.proc_niceness
+            )
 
         except Exception as e:
             logger.error(
